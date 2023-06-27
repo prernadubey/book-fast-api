@@ -1,0 +1,904 @@
+From 7f4084918db43bc92efd108700f88a77e32d8886 Mon Sep 17 00:00:00 2001
+From: prerana <prernadubey1234@gmail.com>
+Date: Wed, 21 Jun 2023 09:43:59 +0200
+Subject: [PATCH 1/3] Added validation and component test
+
+---
+ __init__.py                             |  0
+ run.sh                                  |  2 +-
+ src/__main__.py                         |  2 +
+ src/authors.py                          | 41 +++---------
+ src/books.py                            | 47 +++----------
+ src/borrows.py                          | 89 +++++++++----------------
+ src/db.py                               |  9 ++-
+ src/dependencies.py                     | 20 ++++++
+ src/domain/__init__.py                  |  0
+ src/domain/author.py                    | 14 ++++
+ src/domain/book.py                      | 16 +++++
+ src/domain/borrow.py                    | 14 ++++
+ src/domain/reader.py                    | 14 ++++
+ src/readers.py                          | 40 +++--------
+ src/repository/__init__.py              |  0
+ src/repository/author_sql_repository.py | 53 +++++++++++++++
+ src/repository/book_sql_repository.py   | 59 ++++++++++++++++
+ src/repository/borrow_sql_repository.py | 83 +++++++++++++++++++++++
+ src/repository/reader_sql_repository.py | 53 +++++++++++++++
+ test.sh                                 |  2 +-
+ test/conftest.py                        |  4 +-
+ test/test_authors.py                    |  6 +-
+ test/test_books.py                      | 28 ++++++++
+ test/test_readers.py                    | 32 +++++++++
+ 24 files changed, 460 insertions(+), 168 deletions(-)
+ create mode 100644 __init__.py
+ create mode 100644 src/dependencies.py
+ create mode 100644 src/domain/__init__.py
+ create mode 100644 src/domain/author.py
+ create mode 100644 src/domain/book.py
+ create mode 100644 src/domain/borrow.py
+ create mode 100644 src/domain/reader.py
+ create mode 100644 src/repository/__init__.py
+ create mode 100644 src/repository/author_sql_repository.py
+ create mode 100644 src/repository/book_sql_repository.py
+ create mode 100644 src/repository/borrow_sql_repository.py
+ create mode 100644 src/repository/reader_sql_repository.py
+ create mode 100644 test/test_books.py
+ create mode 100644 test/test_readers.py
+
+diff --git a/__init__.py b/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/run.sh b/run.sh
+index 7b1fe0c..5f6ad81 100755
+--- a/run.sh
++++ b/run.sh
+@@ -2,4 +2,4 @@
+ 
+ docker build -t app --target app .
+ 
+-docker run --rm -it -p 8000:8000 app
++docker run --rm -it -p 8000:8000 -v test_api:/database app
+diff --git a/src/__main__.py b/src/__main__.py
+index 749d8f8..70856dd 100644
+--- a/src/__main__.py
++++ b/src/__main__.py
+@@ -25,7 +25,9 @@ async def root():
+ 
+ @app.on_event("shutdown")
+ async def app_shutdown():
++    await db.connection.commit()
+     await db.connection.close()
++    logging.debug("shutting down")
+     asyncio.get_event_loop().stop()
+ 
+ 
+diff --git a/src/authors.py b/src/authors.py
+index 390fb24..60578c9 100644
+--- a/src/authors.py
++++ b/src/authors.py
+@@ -1,43 +1,24 @@
+ import logging
+ 
+-from fastapi import APIRouter
+-from pydantic import BaseModel
++from fastapi import APIRouter, Depends
++from .repository.author_sql_repository import AuthorSQLRepository
++from .domain.author import Author
+ 
+-from . import db
++from .dependencies import get_author_repository
+ 
+ 
+ log = logging.getLogger(__name__)
+ router = APIRouter()
+ 
+ 
+-class Author(BaseModel):
+-    name: str
+-
+-
+ @router.post("/v1/authors")
+-async def add_author(author: Author):
+-    author_id = (await db.connection.execute_insert(
+-        """
+-        INSERT INTO authors (name) VALUES (?)
+-        """,
+-        (author.name,),
+-    ))[0]
+-    log.debug(f"Author added {author.name}")
+-
+-    return {"author_id": author_id}
++async def add_author(author: Author, author_repo: AuthorSQLRepository = Depends(get_author_repository)):
++    return await author_repo.add_author(author)
+ 
+ 
+ @router.get("/v1/authors")
+-async def get_authors():
+-    async with db.connection.execute(
+-        """
+-        SELECT
+-            id, name
+-        FROM
+-            authors
+-        ORDER BY id ASC
+-        """
+-    ) as cursor:
+-        rows = await cursor.fetchall()
+-
+-    return {"authors": [{"id": item[0], "name": item[1]} for item in rows]}
++async def get_authors(author_repo: AuthorSQLRepository = Depends(get_author_repository)):
++    res = await author_repo.get_authors()
++    return {"authors": res}
++
++
+diff --git a/src/books.py b/src/books.py
+index d94fca8..96066aa 100644
+--- a/src/books.py
++++ b/src/books.py
+@@ -1,50 +1,21 @@
+ import logging
+ 
+-from fastapi import APIRouter
+-from pydantic import BaseModel
+-
+-from . import db
++from fastapi import APIRouter, Depends
++from .repository.book_sql_repository import BooksSQLRepository
++from .domain.book import Book
+ 
++from .dependencies import get_book_repository
+ 
+ log = logging.getLogger(__name__)
+ router = APIRouter()
+ 
+ 
+-class Book(BaseModel):
+-    author_id: int
+-    title: str
+-
+-
+ @router.post("/v1/books")
+-async def add_book(book: Book):
+-    book_id = (await db.connection.execute_insert(
+-        """
+-        INSERT INTO books
+-            (author_id, title)
+-        VALUES (?, ?)
+-        """,
+-        (book.author_id, book.title),
+-    ))[0]
+-
+-    log.debug(f"Book added {book.title}")
+-
+-    return {"book_id": book_id}
++async def add_book(book: Book, book_repo: BooksSQLRepository = Depends(get_book_repository)):
++    return await book_repo.add_book(book)
+ 
+ 
+ @router.get("/v1/books")
+-async def get_books():
+-    async with db.connection.execute(
+-        """
+-        SELECT
+-            books.id,
+-            books.title,
+-            authors.name
+-        FROM
+-            books
+-        JOIN
+-            authors ON authors.id = books.author_id
+-        """
+-    ) as cursor:
+-        rows = await cursor.fetchall()
+-
+-    return {"books": [{"id": item[0], "title": item[1], "author": item[2]} for item in rows]}
++async def get_books(book_repo: BooksSQLRepository = Depends(get_book_repository)):
++    res = await book_repo.get_books()
++    return {"books": res}
+diff --git a/src/borrows.py b/src/borrows.py
+index 17841aa..c3b8d7f 100644
+--- a/src/borrows.py
++++ b/src/borrows.py
+@@ -1,76 +1,47 @@
+ import logging
+-from datetime import datetime
+-from typing import Optional
+ 
+-from fastapi import APIRouter
+-from pydantic import BaseModel
++from fastapi import APIRouter, Depends, HTTPException
+ 
+-from . import db
++from .domain.borrow import Borrow
++from .repository.borrow_sql_repository import BorrowSQLRepository
++from .repository.reader_sql_repository import ReaderSQLRepository
++from .repository.book_sql_repository import BooksSQLRepository
+ 
++from .dependencies import get_borrow_repository, get_reader_repository, get_book_repository
+ 
+ log = logging.getLogger(__name__)
+ router = APIRouter()
+ 
+ 
+-class Borrow(BaseModel):
+-    reader_id: int
+-    book_id: int
+-
+-
+ @router.post("/v1/borrows")
+-async def add_borrow(borrow: Borrow):
+-    await db.connection.execute(
+-        """
+-        INSERT INTO borrows
+-            (reader_id, book_id, borrow_time, return_time)
+-        VALUES
+-            (?, ?, DATE('now'), NULL)
+-        """,
+-        (borrow.reader_id, borrow.book_id),
+-    )
+-    log.debug(f"New borrow from reader id {borrow.reader_id}")
++async def add_borrow(borrow: Borrow, borrow_repo: BorrowSQLRepository = Depends(get_borrow_repository),
++                     reader_repo: ReaderSQLRepository = Depends(get_reader_repository),
++                     book_repo: BooksSQLRepository = Depends(get_book_repository)):
++    is_reader_exist = await reader_repo.is_reader_exist(borrow.reader_id)
++    is_book_exist = await book_repo.is_book_exist(borrow.book_id)
++
++    if is_book_exist and is_reader_exist:
++        book_borrowed = await borrow_repo.book_borrowed(borrow.book_id)
++        if book_borrowed:
++            if book_borrowed.reader_id != borrow.reader_id:
++                raise HTTPException(status_code=403, detail="Requested book is already borrowed. "
++                                                            "Please try with other book.")
++            else:
++                log.debug("Book is already borrowed by same reader.")
++                return
++        else:
++            return await borrow_repo.add_borrow(borrow)
++
++    raise HTTPException(status_code=404, detail="Requested reader or book does not exist. Please check the data.")
+ 
+ 
+ @router.delete("/v1/borrows/{book_id}")
+-async def del_borrow(book_id: int):
+-    await db.connection.execute(
+-        """
+-        UPDATE
+-            borrows
+-        SET
+-            return_time = DATE('now')
+-        WHERE
+-            book_id = ?
+-            AND return_time IS NULL;
+-        """,
+-        (book_id,),
+-    )
+-    log.debug(f"Book {book_id} returned.")
++async def del_borrow(book_id: int, borrow_repo: BorrowSQLRepository = Depends(get_borrow_repository)):
++    return await borrow_repo.delete_borrow(book_id)
+ 
+ 
+ @router.get("/v1/borrows")
+-async def get_borrows():
+-    async with db.connection.execute(
+-        """
+-        SELECT
+-            readers.name,
+-            books.title,
+-            authors.name,
+-            borrows.borrow_time
+-        FROM
+-            borrows
+-        LEFT JOIN
+-            books ON books.id = borrows.book_id
+-        LEFT JOIN
+-            authors ON authors.id = books.author_id
+-        LEFT JOIN
+-            readers ON readers.id = borrows.reader_id
+-        WHERE
+-            borrows.return_time IS NULL
+-        """
+-    ) as cursor:
+-        rows = await cursor.fetchall()
++async def get_borrows(borrow_repo: BorrowSQLRepository = Depends(get_borrow_repository)):
++    res = await borrow_repo.get_borrows()
++    return {"borrows": res}
+ 
+-    return {
+-        "borrows": [{"reader": item[0], "title": item[1], "author": item[2], "borrow_time": item[3]} for item in rows]
+-    }
+diff --git a/src/db.py b/src/db.py
+index d9de2d2..d43dad4 100644
+--- a/src/db.py
++++ b/src/db.py
+@@ -13,7 +13,13 @@ async def initialize():
+ 
+     log.debug("Initializing database...")
+ 
+-    connection = await aiosqlite.connect(f"{os.getcwd()}/app.db")
++    try:
++        connection = await aiosqlite.connect("/database/app.db")
++    except aiosqlite.OperationalError:
++        os.mkdir('/database')
++
++    finally:
++        connection = await aiosqlite.connect("/database/app.db")
+ 
+     await connection.executescript(
+         """
+@@ -42,5 +48,4 @@ async def initialize():
+         );
+         """
+     )
+-
+     log.debug("Database ready.")
+diff --git a/src/dependencies.py b/src/dependencies.py
+new file mode 100644
+index 0000000..ccbcaf3
+--- /dev/null
++++ b/src/dependencies.py
+@@ -0,0 +1,20 @@
++from .repository.book_sql_repository import BooksSQLRepository
++from .repository.author_sql_repository import AuthorSQLRepository
++from .repository.reader_sql_repository import ReaderSQLRepository
++from .repository.borrow_sql_repository import BorrowSQLRepository
++
++
++async def get_book_repository():
++    return BooksSQLRepository()
++
++
++async def get_author_repository():
++    yield AuthorSQLRepository()
++
++
++async def get_reader_repository():
++    return ReaderSQLRepository()
++
++
++async def get_borrow_repository():
++    return BorrowSQLRepository()
+diff --git a/src/domain/__init__.py b/src/domain/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/src/domain/author.py b/src/domain/author.py
+new file mode 100644
+index 0000000..8b977df
+--- /dev/null
++++ b/src/domain/author.py
+@@ -0,0 +1,14 @@
++from pydantic import BaseModel
++
++
++class Author(BaseModel):
++    name: str
++
++
++class AuthorPostResponse(BaseModel):
++    author_id: int
++
++
++class AuthorGetResponse(BaseModel):
++    name: str
++    id: int
+diff --git a/src/domain/book.py b/src/domain/book.py
+new file mode 100644
+index 0000000..5c8b57a
+--- /dev/null
++++ b/src/domain/book.py
+@@ -0,0 +1,16 @@
++from pydantic import BaseModel
++
++
++class Book(BaseModel):
++    author_id: int
++    title: str
++
++
++class BookPostResponse(BaseModel):
++    book_id: int
++
++
++class BookGetResponse(BaseModel):
++    author_name: str
++    title: str
++    id: int
+diff --git a/src/domain/borrow.py b/src/domain/borrow.py
+new file mode 100644
+index 0000000..50d75d2
+--- /dev/null
++++ b/src/domain/borrow.py
+@@ -0,0 +1,14 @@
++from pydantic import BaseModel
++from datetime import date
++
++
++class Borrow(BaseModel):
++    reader_id: int
++    book_id: int
++
++
++class BorrowGetResponse(BaseModel):
++    reader: str
++    title: str
++    author: str
++    borrow_time: date
+diff --git a/src/domain/reader.py b/src/domain/reader.py
+new file mode 100644
+index 0000000..5cec5bb
+--- /dev/null
++++ b/src/domain/reader.py
+@@ -0,0 +1,14 @@
++from pydantic import BaseModel
++
++
++class Reader(BaseModel):
++    name: str
++
++
++class ReaderPostResponse(BaseModel):
++    reader_id: int
++
++
++class ReaderGetResponse(BaseModel):
++    name: str
++    id: int
+diff --git a/src/readers.py b/src/readers.py
+index fc00286..7bf0a00 100644
+--- a/src/readers.py
++++ b/src/readers.py
+@@ -1,44 +1,22 @@
+ import logging
+ 
+-from fastapi import APIRouter
+-from pydantic import BaseModel
++from fastapi import APIRouter, Depends
+ 
+-from . import db
++from .repository.reader_sql_repository import ReaderSQLRepository
++from .domain.reader import Reader
++from .dependencies import get_reader_repository
+ 
+ 
+ log = logging.getLogger(__name__)
+ router = APIRouter()
+ 
+ 
+-class Reader(BaseModel):
+-    name: str
+-
+-
+ @router.post("/v1/readers")
+-async def add_reader(reader: Reader):
+-    reader_id = (await db.connection.execute_insert(
+-        """
+-        INSERT INTO readers
+-            (name)
+-        VALUES (?)
+-        """,
+-        (reader.name,),
+-    ))[0]
+-    log.debug(f"Reader added {reader.name}")
+-    return {"reader_id": reader_id}
++async def add_reader(reader: Reader, reader_repo: ReaderSQLRepository = Depends(get_reader_repository)):
++    return await reader_repo.add_reader(reader)
+ 
+ 
+ @router.get("/v1/readers")
+-async def get_readers():
+-    async with db.connection.execute(
+-        """
+-        SELECT
+-            id,
+-            name
+-        FROM
+-            readers
+-        """
+-    ) as cursor:
+-        rows = await cursor.fetchall()
+-
+-    return {"readers": [{"id": item[0], "name": item[1]} for item in rows]}
++async def get_readers(reader_repo: ReaderSQLRepository = Depends(get_reader_repository)):
++    res = await reader_repo.get_readers()
++    return {"readers": res}
+diff --git a/src/repository/__init__.py b/src/repository/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/src/repository/author_sql_repository.py b/src/repository/author_sql_repository.py
+new file mode 100644
+index 0000000..8645a46
+--- /dev/null
++++ b/src/repository/author_sql_repository.py
+@@ -0,0 +1,53 @@
++import typing as t
++import logging
++from ..domain.author import Author, AuthorGetResponse, AuthorPostResponse
++from .. import db
++
++log = logging.getLogger(__name__)
++
++
++class AuthorSQLRepository:
++
++    async def add_author(self, author: Author) -> AuthorPostResponse:
++        author_id = (await db.connection.execute_insert(
++            """
++            INSERT INTO authors (name) VALUES (?)
++            """,
++            (author.name,),
++        ))[0]
++        log.debug(f"Author added {author.name}")
++
++        return AuthorPostResponse(author_id=author_id)
++
++    async def get_authors(self) -> t.List[AuthorGetResponse]:
++        async with db.connection.execute(
++                """
++                SELECT
++                    id, name
++                FROM
++                    authors
++                ORDER BY id ASC
++                """
++        ) as cursor:
++            rows = await cursor.fetchall()
++
++        return [
++            AuthorGetResponse(id=item[0], name=item[1],) for item in rows
++        ]
++
++    async def get_author(self, author_id: int) -> t.Optional[AuthorGetResponse]:
++        async with db.connection.execute(
++                """
++                SELECT
++                    id, name
++                FROM
++                    authors
++                WHERE authors.id = ?
++                """,
++                (author_id,),
++        ) as cursor:
++            row = await cursor.one_or_none()
++
++        if row:
++            return AuthorGetResponse(id=row[0], name=row[1], )
++        return None
+diff --git a/src/repository/book_sql_repository.py b/src/repository/book_sql_repository.py
+new file mode 100644
+index 0000000..24322c3
+--- /dev/null
++++ b/src/repository/book_sql_repository.py
+@@ -0,0 +1,59 @@
++import typing as t
++import logging
++from .. domain.book import Book, BookPostResponse, BookGetResponse
++from .. import db
++log = logging.getLogger(__name__)
++
++
++class BooksSQLRepository:
++
++    async def add_book(self, book: Book) -> BookPostResponse:
++
++        book_id = (await db.connection.execute_insert(
++            """
++            INSERT INTO books
++                (author_id, title)
++            VALUES (?, ?)
++            """,
++            (book.author_id, book.title),
++        ))[0]
++
++        log.debug(f"Book added {book.title}")
++
++        return BookPostResponse(book_id=book_id)
++
++    async def get_books(self) -> t.List[BookGetResponse]:
++        async with db.connection.execute(
++                """
++                SELECT
++                    books.id,
++                    books.title,
++                    authors.name
++                FROM
++                    books
++                JOIN
++                    authors ON authors.id = books.author_id
++                """
++        ) as cursor:
++            rows = await cursor.fetchall()
++        return [
++            BookGetResponse(id=item[0], title=item[1], author_name=item[2],)
++            for item in rows
++        ]
++
++    async def is_book_exist(self, book_id: int) -> t.Optional[bool]:
++        async with db.connection.execute(
++                """
++                SELECT
++                    *
++                FROM
++                    books
++                WHERE
++                    books.id = ?
++                """,
++                (book_id,),
++        ) as cursor:
++            row = await cursor.fetchone()
++        if row:
++            return True
++        return None
+diff --git a/src/repository/borrow_sql_repository.py b/src/repository/borrow_sql_repository.py
+new file mode 100644
+index 0000000..c70feba
+--- /dev/null
++++ b/src/repository/borrow_sql_repository.py
+@@ -0,0 +1,83 @@
++import typing as t
++import logging
++from ..domain.borrow import Borrow, BorrowGetResponse
++from .. import db
++
++log = logging.getLogger(__name__)
++
++
++class BorrowSQLRepository:
++
++    async def add_borrow(self, borrow: Borrow):
++        await db.connection.execute(
++            """
++            INSERT INTO borrows
++                (reader_id, book_id, borrow_time, return_time)
++            VALUES
++                (?, ?, DATE('now'), NULL)
++            """,
++            (borrow.reader_id, borrow.book_id),
++        )
++        log.debug(f"New borrow from reader id {borrow.reader_id}")
++        return
++
++    async def delete_borrow(self, book_id: int):
++        await db.connection.execute(
++            """
++            UPDATE
++                borrows
++            SET
++                return_time = DATE('now')
++            WHERE
++                book_id = ?
++                AND return_time IS NULL;
++            """,
++            (book_id,),
++        )
++        log.debug(f"Book {book_id} returned.")
++        return
++
++    async def get_borrows(self) -> t.List[BorrowGetResponse]:
++        async with db.connection.execute(
++                """
++                SELECT
++                    readers.name,
++                    books.title,
++                    authors.name,
++                    borrows.borrow_time
++                FROM
++                    borrows
++                LEFT JOIN
++                    books ON books.id = borrows.book_id
++                LEFT JOIN
++                    authors ON authors.id = books.author_id
++                LEFT JOIN
++                    readers ON readers.id = borrows.reader_id
++                WHERE
++                    borrows.return_time IS NULL
++                """
++        ) as cursor:
++            rows = await cursor.fetchall()
++
++        return [BorrowGetResponse(reader=item[0], title=item[1], author=item[2],
++                                  borrow_time=item[3]) for item in rows]
++
++    async def book_borrowed(self, book_id: int) -> t.Optional[Borrow]:
++        async with db.connection.execute(
++                """
++                SELECT
++                    borrows.book_id,
++                    borrows.reader_id
++                FROM
++                    borrows
++                WHERE
++                    borrows.book_id = ? 
++                AND 
++                    borrows.return_time IS NULL
++                """,
++                (book_id,),
++        ) as cursor:
++            row = await cursor.fetchone()
++        if row:
++            return Borrow(book_id=row[0], reader_id=row[1])
++        return None
+diff --git a/src/repository/reader_sql_repository.py b/src/repository/reader_sql_repository.py
+new file mode 100644
+index 0000000..a2a9a14
+--- /dev/null
++++ b/src/repository/reader_sql_repository.py
+@@ -0,0 +1,53 @@
++import typing as t
++import logging
++from ..domain.reader import Reader, ReaderPostResponse, ReaderGetResponse
++from .. import db
++
++log = logging.getLogger(__name__)
++
++
++class ReaderSQLRepository:
++
++    async def add_reader(self, reader: Reader) -> ReaderPostResponse:
++        reader_id = (await db.connection.execute_insert(
++            """
++            INSERT INTO readers
++                (name)
++            VALUES (?)
++            """,
++            (reader.name,),
++        ))[0]
++        log.debug(f"Reader added {reader.name}")
++        return ReaderPostResponse(reader_id=reader_id)
++
++    async def get_readers(self) -> t.List[ReaderGetResponse]:
++        async with db.connection.execute(
++                """
++                SELECT
++                    id,
++                    name
++                FROM
++                    readers
++                """
++        ) as cursor:
++            rows = await cursor.fetchall()
++
++        return [
++            ReaderGetResponse(id=item[0], name=item[1],) for item in rows
++        ]
++
++    async def is_reader_exist(self, reader_id: int) -> t.Optional[bool]:
++        async with db.connection.execute(
++                """
++                SELECT
++                    *
++                FROM
++                    readers
++                WHERE readers.id = ?
++                """,
++                (reader_id,)
++        ) as cursor:
++            row = await cursor.fetchone()
++        if row:
++            return True
++        return None
+diff --git a/test.sh b/test.sh
+index 592e5e6..72641e2 100755
+--- a/test.sh
++++ b/test.sh
+@@ -10,5 +10,5 @@ touch logs/service.log
+ docker run \
+     --rm \
+     -it \
+-    -v "${PWD}/logs:/logs:rw" \
++    -v "${PWD}/logs/service.log:/logs/service.log:rw" \
+     app-test
+diff --git a/test/conftest.py b/test/conftest.py
+index 1fb4925..7d8ed7b 100644
+--- a/test/conftest.py
++++ b/test/conftest.py
+@@ -1,12 +1,11 @@
+ import subprocess
+ import time
+-
+ import pytest
+ 
+ 
+ @pytest.fixture
+ def app():
+-    with open("/logs/service.log", "a") as log:
++    with open("./logs/service.log", "a") as log:
+         service = subprocess.Popen(
+             ["/usr/local/bin/python", "-m" "app"],
+             cwd="/",
+@@ -18,4 +17,3 @@ def app():
+         yield
+ 
+         service.terminate()
+-        service.wait()
+diff --git a/test/test_authors.py b/test/test_authors.py
+index 0157c62..4d23959 100644
+--- a/test/test_authors.py
++++ b/test/test_authors.py
+@@ -2,11 +2,11 @@ import requests
+ 
+ 
+ def test_add_authors(app):
+-    result = requests.post("http://127.0.0.1:8000/v1/authors", json={"name": "Arthur C. Clarke"})
++    result = requests.post("http://0.0.0.0:8000/v1/authors", json={"name": "Arthur C. Clarke"})
+     assert result.ok
+ 
+-    result = requests.post("http://127.0.0.1:8000/v1/authors", json={"name": "Stephen Hawking"})
++    result = requests.post("http://0.0.0.0:8000/v1/authors", json={"name": "Stephen Hawking"})
+     assert result.ok
+ 
+-    result = requests.get("http://127.0.0.1:8000/v1/authors")
++    result = requests.get("http://0.0.0.0:8000/v1/authors")
+     assert result.json() == {"authors": [{"id": 1, "name": "Arthur C. Clarke"}, {"id": 2, "name": "Stephen Hawking"}]}
+diff --git a/test/test_books.py b/test/test_books.py
+new file mode 100644
+index 0000000..2cb8e77
+--- /dev/null
++++ b/test/test_books.py
+@@ -0,0 +1,28 @@
++import requests
++
++GET_BOOKS = {
++    "books": [
++        {
++            "author_name": "Arthur C. Clarke",
++            "title": "test_book1",
++            "id": 1
++        },
++        {
++            "author_name": "Stephen Hawking",
++            "title": "test_book2",
++            "id": 2
++        }
++    ]
++}
++
++
++def test_add_books(app):
++    result = requests.post("http://0.0.0.0:8000/v1/books", json={"author_id": 1, "title": "test_book1"})
++    assert result.ok
++
++    result = requests.post("http://0.0.0.0:8000/v1/books", json={"author_id": 2, "title": "test_book2"})
++    assert result.json() == {"book_id": 2}
++
++    result = requests.get("http://0.0.0.0:8000/v1/books")
++    assert result.json() == GET_BOOKS
++
+diff --git a/test/test_readers.py b/test/test_readers.py
+new file mode 100644
+index 0000000..f346eef
+--- /dev/null
++++ b/test/test_readers.py
+@@ -0,0 +1,32 @@
++import requests
++
++GET_READERS = {
++    "readers": [
++        {
++            "name": "test_reader1",
++            "id": 1
++        },
++        {
++            "name": "test_reader2",
++            "id": 2
++        },
++        {
++            "name": "test_reader3",
++            "id": 3
++        }
++    ]
++}
++
++
++def test_add_readers(app):
++    result = requests.post("http://0.0.0.0:8000/v1/readers", json={"name": "test_reader1"})
++    assert result.ok
++
++    result = requests.post("http://0.0.0.0:8000/v1/readers", json={"name": "test_reader2"})
++    assert result.json() == {"reader_id": 2}
++
++    result = requests.post("http://0.0.0.0:8000/v1/readers", json={"name": "test_reader3"})
++    assert result.json() == {"reader_id": 3}
++
++    result = requests.get("http://0.0.0.0:8000/v1/readers")
++    assert result.json() == GET_READERS
+-- 
+2.41.0.windows.1
+

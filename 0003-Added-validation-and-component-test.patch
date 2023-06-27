@@ -1,0 +1,152 @@
+From 81f8e3e81dcdb71b375cf5aeb020a8b6f462fa72 Mon Sep 17 00:00:00 2001
+From: prerana <prernadubey1234@gmail.com>
+Date: Wed, 21 Jun 2023 12:51:26 +0200
+Subject: [PATCH 3/3] Added validation and component test
+
+---
+ test.sh                  |  4 ++--
+ test/conftest.py         |  3 ++-
+ test/test_authors.py     |  6 +++---
+ test/test_books.py       |  6 +++---
+ test/test_readers.py     |  8 ++++----
+ test/test_url_borrows.py | 14 +++++++-------
+ 6 files changed, 21 insertions(+), 20 deletions(-)
+
+diff --git a/test.sh b/test.sh
+index 72641e2..bb37ed7 100755
+--- a/test.sh
++++ b/test.sh
+@@ -10,5 +10,5 @@ touch logs/service.log
+ docker run \
+     --rm \
+     -it \
+-    -v "${PWD}/logs/service.log:/logs/service.log:rw" \
+-    app-test
++    -v "${PWD}/logs:/logs:rw" \
++    app-test
+\ No newline at end of file
+diff --git a/test/conftest.py b/test/conftest.py
+index 7d8ed7b..7525dd3 100644
+--- a/test/conftest.py
++++ b/test/conftest.py
+@@ -5,7 +5,7 @@ import pytest
+ 
+ @pytest.fixture
+ def app():
+-    with open("./logs/service.log", "a") as log:
++    with open("/logs/service.log", "a") as log:
+         service = subprocess.Popen(
+             ["/usr/local/bin/python", "-m" "app"],
+             cwd="/",
+@@ -17,3 +17,4 @@ def app():
+         yield
+ 
+         service.terminate()
++
+diff --git a/test/test_authors.py b/test/test_authors.py
+index 4d23959..0157c62 100644
+--- a/test/test_authors.py
++++ b/test/test_authors.py
+@@ -2,11 +2,11 @@ import requests
+ 
+ 
+ def test_add_authors(app):
+-    result = requests.post("http://0.0.0.0:8000/v1/authors", json={"name": "Arthur C. Clarke"})
++    result = requests.post("http://127.0.0.1:8000/v1/authors", json={"name": "Arthur C. Clarke"})
+     assert result.ok
+ 
+-    result = requests.post("http://0.0.0.0:8000/v1/authors", json={"name": "Stephen Hawking"})
++    result = requests.post("http://127.0.0.1:8000/v1/authors", json={"name": "Stephen Hawking"})
+     assert result.ok
+ 
+-    result = requests.get("http://0.0.0.0:8000/v1/authors")
++    result = requests.get("http://127.0.0.1:8000/v1/authors")
+     assert result.json() == {"authors": [{"id": 1, "name": "Arthur C. Clarke"}, {"id": 2, "name": "Stephen Hawking"}]}
+diff --git a/test/test_books.py b/test/test_books.py
+index 2cb8e77..19ce1df 100644
+--- a/test/test_books.py
++++ b/test/test_books.py
+@@ -17,12 +17,12 @@ GET_BOOKS = {
+ 
+ 
+ def test_add_books(app):
+-    result = requests.post("http://0.0.0.0:8000/v1/books", json={"author_id": 1, "title": "test_book1"})
++    result = requests.post("http://127.0.0.1:8000/v1/books", json={"author_id": 1, "title": "test_book1"})
+     assert result.ok
+ 
+-    result = requests.post("http://0.0.0.0:8000/v1/books", json={"author_id": 2, "title": "test_book2"})
++    result = requests.post("http://127.0.0.1:8000/v1/books", json={"author_id": 2, "title": "test_book2"})
+     assert result.json() == {"book_id": 2}
+ 
+-    result = requests.get("http://0.0.0.0:8000/v1/books")
++    result = requests.get("http://127.0.0.1:8000/v1/books")
+     assert result.json() == GET_BOOKS
+ 
+diff --git a/test/test_readers.py b/test/test_readers.py
+index f346eef..6f608b0 100644
+--- a/test/test_readers.py
++++ b/test/test_readers.py
+@@ -19,14 +19,14 @@ GET_READERS = {
+ 
+ 
+ def test_add_readers(app):
+-    result = requests.post("http://0.0.0.0:8000/v1/readers", json={"name": "test_reader1"})
++    result = requests.post("http://127.0.0.1:8000/v1/readers", json={"name": "test_reader1"})
+     assert result.ok
+ 
+-    result = requests.post("http://0.0.0.0:8000/v1/readers", json={"name": "test_reader2"})
++    result = requests.post("http://127.0.0.1:8000/v1/readers", json={"name": "test_reader2"})
+     assert result.json() == {"reader_id": 2}
+ 
+-    result = requests.post("http://0.0.0.0:8000/v1/readers", json={"name": "test_reader3"})
++    result = requests.post("http://127.0.0.1:8000/v1/readers", json={"name": "test_reader3"})
+     assert result.json() == {"reader_id": 3}
+ 
+-    result = requests.get("http://0.0.0.0:8000/v1/readers")
++    result = requests.get("http://127.0.0.1:8000/v1/readers")
+     assert result.json() == GET_READERS
+diff --git a/test/test_url_borrows.py b/test/test_url_borrows.py
+index cad9843..c6def40 100644
+--- a/test/test_url_borrows.py
++++ b/test/test_url_borrows.py
+@@ -30,30 +30,30 @@ RES_BOOK_READER_NOT_EXIST = {
+ 
+ 
+ def test_add_borrows(app):
+-    result = requests.post("http://0.0.0.0:8000/v1/borrows", json={"reader_id": 1, "book_id": 1})
++    result = requests.post("http://127.0.0.1:8000/v1/borrows", json={"reader_id": 1, "book_id": 1})
+     assert result.ok
+ 
+-    result = requests.post("http://0.0.0.0:8000/v1/borrows", json={"reader_id": 2, "book_id": 2})
++    result = requests.post("http://127.0.0.1:8000/v1/borrows", json={"reader_id": 2, "book_id": 2})
+     assert result.ok
+ 
+     # CASE: When reader exist but not book.
+-    result = requests.post("http://0.0.0.0:8000/v1/borrows", json={"reader_id": 3, "book_id": 5})
++    result = requests.post("http://127.0.0.1:8000/v1/borrows", json={"reader_id": 3, "book_id": 5})
+     assert result.json() == RES_BOOK_READER_NOT_EXIST
+     assert result.status_code == 404
+ 
+     # CASE: When reader and book both does not exist.
+-    result = requests.post("http://0.0.0.0:8000/v1/borrows", json={"reader_id": 5, "book_id": 5})
++    result = requests.post("http://127.0.0.1:8000/v1/borrows", json={"reader_id": 5, "book_id": 5})
+     assert result.json() == RES_BOOK_READER_NOT_EXIST
+     assert result.status_code == 404
+ 
+     # CASE: When book booked by someone else.
+-    result = requests.post("http://0.0.0.0:8000/v1/borrows", json={"reader_id": 3, "book_id": 1})
++    result = requests.post("http://127.0.0.1:8000/v1/borrows", json={"reader_id": 3, "book_id": 1})
+     assert result.json() == RES_BOOK_BORROWED
+     assert result.status_code == 403
+ 
+     # CASE: When book already borrowed by same reader.
+-    result = requests.post("http://0.0.0.0:8000/v1/borrows", json={"reader_id": 1, "book_id": 1})
++    result = requests.post("http://127.0.0.1:8000/v1/borrows", json={"reader_id": 1, "book_id": 1})
+     assert result.ok
+ 
+-    result = requests.get("http://0.0.0.0:8000/v1/borrows")
++    result = requests.get("http://127.0.0.1:8000/v1/borrows")
+     assert result.json() == GET_BORROWS
+-- 
+2.41.0.windows.1
+

@@ -1,0 +1,78 @@
+From b5302435ba66df746425d010ef6148b419d7c9b3 Mon Sep 17 00:00:00 2001
+From: prerana <prernadubey1234@gmail.com>
+Date: Wed, 21 Jun 2023 09:44:21 +0200
+Subject: [PATCH 2/3] Added validation and component test
+
+---
+ test/test_url_borrows.py | 59 ++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 59 insertions(+)
+ create mode 100644 test/test_url_borrows.py
+
+diff --git a/test/test_url_borrows.py b/test/test_url_borrows.py
+new file mode 100644
+index 0000000..cad9843
+--- /dev/null
++++ b/test/test_url_borrows.py
+@@ -0,0 +1,59 @@
++import requests
++from datetime import date
++
++
++TODAY_DATE = str(date.today())
++GET_BORROWS = {
++    "borrows": [
++        {
++            "reader": "test_reader1",
++            "title": "test_book1",
++            "author": "Arthur C. Clarke",
++            "borrow_time": TODAY_DATE
++        },
++        {
++            "reader": "test_reader2",
++            "title": "test_book2",
++            "author": "Stephen Hawking",
++            "borrow_time": TODAY_DATE
++        }
++    ]
++}
++
++RES_BOOK_BORROWED = {
++    "detail": "Requested book is already borrowed. Please try with other book."
++}
++
++RES_BOOK_READER_NOT_EXIST = {
++    "detail": "Requested reader or book does not exist. Please check the data."
++}
++
++
++def test_add_borrows(app):
++    result = requests.post("http://0.0.0.0:8000/v1/borrows", json={"reader_id": 1, "book_id": 1})
++    assert result.ok
++
++    result = requests.post("http://0.0.0.0:8000/v1/borrows", json={"reader_id": 2, "book_id": 2})
++    assert result.ok
++
++    # CASE: When reader exist but not book.
++    result = requests.post("http://0.0.0.0:8000/v1/borrows", json={"reader_id": 3, "book_id": 5})
++    assert result.json() == RES_BOOK_READER_NOT_EXIST
++    assert result.status_code == 404
++
++    # CASE: When reader and book both does not exist.
++    result = requests.post("http://0.0.0.0:8000/v1/borrows", json={"reader_id": 5, "book_id": 5})
++    assert result.json() == RES_BOOK_READER_NOT_EXIST
++    assert result.status_code == 404
++
++    # CASE: When book booked by someone else.
++    result = requests.post("http://0.0.0.0:8000/v1/borrows", json={"reader_id": 3, "book_id": 1})
++    assert result.json() == RES_BOOK_BORROWED
++    assert result.status_code == 403
++
++    # CASE: When book already borrowed by same reader.
++    result = requests.post("http://0.0.0.0:8000/v1/borrows", json={"reader_id": 1, "book_id": 1})
++    assert result.ok
++
++    result = requests.get("http://0.0.0.0:8000/v1/borrows")
++    assert result.json() == GET_BORROWS
+-- 
+2.41.0.windows.1
+
